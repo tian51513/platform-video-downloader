@@ -376,6 +376,11 @@ class TaskService:
             await self.db.update_task_status(task_id, "pending", total_videos=total, scraped_videos=total, total_downloads=dl_count, error_message=None)
             await self._broadcast({"type": "task_status", "task_id": task_id, "data": {"status": "pending", "total_downloads": dl_count}})
             logger.info(f"[TaskService] 任务 {task_id} 已创建 {dl_count} 个待下载记录")
+            # 重抓兜底：dl_count 为新建记录数，全部已存在时为 0，上面的
+            # "pending/0" 可能与实际下载行不符（如全部已完成）。按实际行
+            # 重新同步状态与计数，防止 start_downloads 无 pending 可跑时
+            # 任务永远卡在 pending（否则只有下载结束的 finally 才会同步）。
+            await self.db.sync_task_status_from_downloads(task_id)
         else:
             await self.db.update_task_status(task_id, "failed", error_message="无法获取创作者信息")
             await self._broadcast({"type": "task_status", "task_id": task_id, "data": {"status": "failed"}})
