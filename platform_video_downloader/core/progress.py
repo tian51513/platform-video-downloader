@@ -28,9 +28,6 @@ class ProgressReporter:
     async def downloading(self, **fields):
         await self("downloading", **fields)
 
-    async def progress(self, downloaded: int, **fields):
-        await self("downloading", downloaded=downloaded, **fields)
-
     async def merging(self):
         await self("merging")
 
