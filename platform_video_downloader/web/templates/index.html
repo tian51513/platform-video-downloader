@@ -555,6 +555,23 @@
         let ws = null;
 
         // ========== Utilities ==========
+        function showTip(msg, duration = 1800) {
+            let tip = document.getElementById('pvd-tip');
+            if (!tip) {
+                tip = document.createElement('div');
+                tip.id = 'pvd-tip';
+                tip.className = 'copy-tip';
+                tip.style.left = '50%';
+                tip.style.top = '48px';
+                tip.style.transform = 'translateX(-50%)';
+                document.body.appendChild(tip);
+            }
+            tip.textContent = msg;
+            tip.classList.add('show');
+            clearTimeout(tip._timer);
+            tip._timer = setTimeout(() => tip.classList.remove('show'), duration);
+        }
+
         function escHtml(s) {
             const d = document.createElement('div');
             d.textContent = s;
