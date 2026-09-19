@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-import json
 import logging
 import re
 import sys
@@ -17,9 +16,9 @@ from platform_video_downloader.config import (
     get_effective_db_path,
 )
 from platform_video_downloader.bilibili.api import BilibiliAPI
+from platform_video_downloader.core.ingest import enqueue_downloads, upsert_videos
 from platform_video_downloader.core.manager import DownloadManager
 from platform_video_downloader.storage.database import Database
-from platform_video_downloader.storage.files import build_filename, resolve_save_path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logging.getLogger("aiosqlite").setLevel(logging.WARNING)
@@ -161,44 +160,22 @@ async def _run_download(args, db):
 
                 videos = data['videos']
                 sections = data['sections']
-                section_map = {s["remote_id"]: s for s in sections}
 
-                existing = set()
-                if not args.force:
-                    existing = await db.get_existing_downloads(cid)
+                # 统一入库接缝：upsert video 行（已存在的仅补 tags）
+                await upsert_videos(db, cid, videos, sections)
 
-                new_videos = 0
-                for video_data in videos:
-                    remote_id = video_data["remote_id"]
-                    sec = section_map.get(remote_id)
-                    video = await db.get_video_by_remote(cid, remote_id)
-                    if not video:
-                        vid = await db.insert_video(
-                            creator_id=cid, remote_id=remote_id, title=video_data["title"],
-                            duration=video_data.get("duration"), pubdate=video_data.get("pubdate"),
-                            extra=json.dumps(video_data.get("extra")),
-                            section_id=sec["section_id"] if sec else None,
-                            section_name=sec["section_name"] if sec else None,
-                        )
-                        video = await db.get_video(vid)
-                    # 存储标签（采集阶段直接从 arc/search vlist.tag 获取）
-                    tags = video_data.get("tags", [])
-                    if tags and not video.get("tags"):
-                        await db.update_video_tags(video["id"], tags)
-
-                    if not args.force and (remote_id, resolution_priority[0]) in existing:
-                        continue
-
-                    creator_info = await db.get_creator(cid)
-                    filename = build_filename(
-                        title=video_data["title"], creator=creator_info["name"],
-                        section=sec["section_name"] if sec else None,
-                        bvid=video_data["remote_id"],
-                        template=args.name_template or DEFAULT_NAME_TEMPLATE,
-                    )
-                    save_path = resolve_save_path(args.output, filename)
-                    await db.insert_download(video_id=video["id"], save_path=save_path, resolution=resolution_priority[0])
-                    new_videos += 1
+                # 统一排队接缝：skip_existing=not args.force（CLI 语义：
+                # 非 --force 时已有记录一律预检跳过；failed 两种模式都会重试）
+                creator_info = await db.get_creator(cid)
+                rows = await db.get_videos_by_creator(cid)
+                new_videos = await enqueue_downloads(
+                    db, cid, rows,
+                    creator_name=creator_info["name"] if creator_info else "",
+                    save_dir=args.output,
+                    name_template=args.name_template or DEFAULT_NAME_TEMPLATE,
+                    resolution=resolution_priority[0],
+                    skip_existing=not args.force,
+                )
 
                 await db.update_creator_sync(cid)
                 logger.info(f"Found {len(videos)} videos, {new_videos} new downloads queued")
@@ -221,7 +198,8 @@ async def _run_download(args, db):
             max_concurrent_downloads=args.concurrency,
             name_template=args.name_template or DEFAULT_NAME_TEMPLATE,
         )
-        await manager.run(session)
+        # CLI 只下载用户指定的 URL，不隐式入队库中全部 UP 主的 pending
+        await manager.run(session, auto_discover=False)
 
     stats = await db.get_stats()
     logger.info(f"Done: {stats}")

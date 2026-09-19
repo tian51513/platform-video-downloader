@@ -284,8 +284,9 @@ class Database:
             "VALUES (?, ?, ?)",
             (video_id, save_path, resolution),
         )
-        if cur.lastrowid == 0:
-            # Record exists — if it's in a terminal state, reset to pending
+        if cur.rowcount == 0:
+            # Record exists (INSERT OR IGNORE 冲突时 rowcount=0；lastrowid 会保留
+            # 上一次插入的值而非 0，不能作为冲突判据) — reset to pending if terminal
             cur2 = await self._xq(
                 "SELECT status FROM download WHERE video_id=? AND resolution=?",
                 (video_id, resolution),
@@ -298,7 +299,7 @@ class Database:
                 (save_path, video_id, resolution),
             )
 
-            if old_row and old_row[0] != "pending":
+            if old_row and old_row[0] in ("failed", "skipped"):
                 logger.info(f"重置下载 video_id={video_id} 分辨率={resolution}: {old_row[0]} → pending")
             cur = await self._xq(
                 "SELECT id FROM download WHERE video_id=? AND resolution=?",

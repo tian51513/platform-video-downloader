@@ -16,6 +16,7 @@ from platform_video_downloader.config import (
     load_settings,
 )
 from platform_video_downloader.bilibili.api import BilibiliAPI
+from platform_video_downloader.core.ingest import enqueue_downloads, upsert_videos
 from platform_video_downloader.core.manager import DownloadManager
 from platform_video_downloader.platforms.base import create_registry
 
@@ -335,29 +336,9 @@ class TaskService:
             else:
                 await self.db.update_task_status(task_id, "scraping", total_videos=total, scraped_videos=total)
 
-            # 存储视频
-            sections = data.get("sections", [])
-            section_map = {s["remote_id"]: s for s in sections}
-            for video_data in videos:
-                if cid is None:
-                    continue
-                remote_id = video_data["remote_id"]
-                sec = section_map.get(remote_id)
-                video = await self.db.get_video_by_remote(cid, remote_id)
-                if not video:
-                    vid = await self.db.insert_video(
-                        creator_id=cid, remote_id=remote_id,
-                        title=video_data["title"],
-                        duration=video_data.get("duration"),
-                        pubdate=video_data.get("pubdate"),
-                        extra=json.dumps(video_data.get("extra")),
-                        section_id=sec["section_id"] if sec else None,
-                        section_name=sec["section_name"] if sec else None,
-                        tags=video_data.get("tags"),
-                    )
-                tags = video_data.get("tags", [])
-                if tags and video and not video.get("tags"):
-                    await self.db.update_video_tags(video["id"], tags)
+            # 存储视频（统一入库接缝：upsert video 行，已存在的仅补 tags）
+            if cid is not None:
+                await upsert_videos(self.db, cid, videos, sections=data.get("sections", []))
         finally:
             # 独立清理，防止单个失败导致另一个泄漏
             if browser:
@@ -374,31 +355,24 @@ class TaskService:
         await self._broadcast({"type": "scrape_progress", "task_id": task_id,
                                "data": {"scraped": total, "total": total, "phase": "done"}})
 
-        # 创建待下载记录
+        # 创建待下载记录（统一排队接缝：Web 语义，skip_existing=False，
+        # 依赖 insert_download 的 DB 级去重——completed 保留、failed/skipped 重置）
         if cid:
-            settings = load_settings()
             resolution_priority = settings.get("resolution_priority", DEFAULT_RESOLUTION_PRIORITY)
             name_template = settings.get("name_template", DEFAULT_NAME_TEMPLATE)
             save_dir = settings.get("output_dir", "./downloads")
-            from platform_video_downloader.storage.files import build_filename, resolve_save_path
-            videos = await self.db.get_videos_by_creator(cid)
-            dl_count = 0
+            rows = await self.db.get_videos_by_creator(cid)
             resolution = resolution_priority[0] if resolution_priority else "720p"
             # YouTube 下载时由 yt-dlp 动态选择最优格式
             if platform.name == "youtube":
                 resolution = "1080p"  # 默认占位，下载完成后会更新为实际值
-            for video in videos:
-                filename = build_filename(
-                    title=video["title"], creator=creator_info["name"] if creator_info else "",
-                    section=video.get("section_name"), bvid=video.get("remote_id", ""),
-                    template=name_template,
-                )
-                save_path = resolve_save_path(save_dir, filename)
-                await self.db.insert_download(
-                    video_id=video["id"], save_path=save_path,
-                    resolution=resolution,
-                )
-                dl_count += 1
+            dl_count = await enqueue_downloads(
+                self.db, cid, rows,
+                creator_name=creator_info["name"] if creator_info else "",
+                save_dir=save_dir,
+                name_template=name_template,
+                resolution=resolution,
+            )
             await self.db.update_task_status(task_id, "pending", total_videos=total, scraped_videos=total, total_downloads=dl_count, error_message=None)
             await self._broadcast({"type": "task_status", "task_id": task_id, "data": {"status": "pending", "total_downloads": dl_count}})
             logger.info(f"[TaskService] 任务 {task_id} 已创建 {dl_count} 个待下载记录")
@@ -658,24 +632,15 @@ class TaskService:
             resolution_priority = settings.get("resolution_priority", DEFAULT_RESOLUTION_PRIORITY)
             name_template = settings.get("name_template", DEFAULT_NAME_TEMPLATE)
             save_dir = settings.get("output_dir", "./downloads")
-            from platform_video_downloader.storage.files import build_filename, resolve_save_path
             creator_name = await self._get_creator_name(cid)
-            for vid_id in new_video_ids:
-                video = await self.db.get_video(vid_id)
-                if video:
-                    await self.db.insert_download(
-                        video_id=vid_id,
-                        save_path=resolve_save_path(
-                            save_dir,
-                            build_filename(
-                                title=video["title"], creator=creator_name,
-                                section=video.get("section_name"),
-                                bvid=video.get("remote_id", ""),
-                                template=name_template,
-                            ),
-                        ),
-                        resolution=resolution_priority[0] if resolution_priority else "720p",
-                    )
+            new_rows = [row for vid_id in new_video_ids if (row := await self.db.get_video(vid_id))]
+            await enqueue_downloads(
+                self.db, cid, new_rows,
+                creator_name=creator_name,
+                save_dir=save_dir,
+                name_template=name_template,
+                resolution=resolution_priority[0] if resolution_priority else "720p",
+            )
         result["backfill"] = len(new_video_ids)
 
         # 同步任务状态

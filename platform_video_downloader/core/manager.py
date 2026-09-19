@@ -2,8 +2,8 @@ import asyncio
 import logging
 
 from platform_video_downloader.config import DEFAULT_NAME_TEMPLATE, MAX_CONCURRENT_DOWNLOADS, MAX_CONCURRENT_API_REQUESTS
+from platform_video_downloader.core.ingest import enqueue_downloads
 from platform_video_downloader.core.worker import download_video
-from platform_video_downloader.storage.files import build_filename, resolve_save_path
 
 logger = logging.getLogger(__name__)
 
@@ -44,18 +44,15 @@ class DownloadManager:
         if auto_discover:
             creators = await self.db.get_all_creators()
             for creator in creators:
+                # queue 已按 get_existing_downloads 预检过滤，行为与原内联循环一致
                 queue = await self._build_queue(creator["id"])
-                for video in queue:
-                    filename = build_filename(
-                        title=video["title"], creator=creator["name"],
-                        section=video.get("section_name"), bvid=video.get("remote_id", ""),
-                        template=self.name_template,
-                    )
-                    save_path = resolve_save_path(self.save_dir, filename)
-                    await self.db.insert_download(
-                        video_id=video["id"], save_path=save_path,
-                        resolution=self.resolution_priority[0],
-                    )
+                await enqueue_downloads(
+                    self.db, creator["id"], queue,
+                    creator_name=creator["name"],
+                    save_dir=self.save_dir,
+                    name_template=self.name_template,
+                    resolution=self.resolution_priority[0],
+                )
 
         # Process all pending downloads (fetch all pages, not just first page)
         all_pending: list[dict] = []
@@ -109,18 +106,15 @@ class DownloadManager:
 
     async def enqueue_creator_videos(self, creator_id: int):
         videos = await self.db.get_videos_by_creator(creator_id)
-        existing = await self.db.get_existing_downloads(creator_id)
-        new_count = 0
-        for video in videos:
-            if (video["remote_id"], self.resolution_priority[0]) not in existing:
-                creator = await self.db.get_creator(creator_id)
-                filename = build_filename(
-                    title=video["title"], creator=creator["name"],
-                    section=video.get("section_name"), bvid=video.get("remote_id", ""),
-                    template=self.name_template,
-                )
-                save_path = resolve_save_path(self.save_dir, filename)
-                await self.db.insert_download(video_id=video["id"], save_path=save_path, resolution=self.resolution_priority[0])
-                new_count += 1
+        creator = await self.db.get_creator(creator_id)
+        # skip_existing=True：已有记录（completed/skipped/downloading/pending）一律跳过
+        new_count = await enqueue_downloads(
+            self.db, creator_id, videos,
+            creator_name=creator["name"] if creator else "",
+            save_dir=self.save_dir,
+            name_template=self.name_template,
+            resolution=self.resolution_priority[0],
+            skip_existing=True,
+        )
         logger.info(f"Enqueued {new_count} new downloads for creator {creator_id}")
         return new_count
