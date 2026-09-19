@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 
+from platform_video_downloader.core.progress import make_progress
 from platform_video_downloader.platforms.base import BasePlatform
 
 logger = logging.getLogger(__name__)
@@ -132,15 +133,14 @@ class YouTubePlatform(BasePlatform):
 
         # 进度状态
         progress_data = {"downloaded": 0, "total": 0}
+        progress = make_progress(ws_manager, download_id)
 
         async def _broadcast_progress():
-            if ws_manager and progress_data["total"] > 0:
-                await ws_manager.broadcast({
-                    "type": "download_progress",
-                    "download_id": download_id,
-                    "file_size": progress_data["downloaded"],
-                    "total_size": progress_data["total"],
-                })
+            if progress_data["total"] > 0:
+                await progress(
+                    file_size=progress_data["downloaded"],
+                    total_size=progress_data["total"],
+                )
 
         def _progress_hook(d):
             if d["status"] == "downloading":
@@ -159,12 +159,7 @@ class YouTubePlatform(BasePlatform):
             return {"status": "failed", "error": "已取消"}
 
         await db.update_download_status(download_id, "downloading")
-        if ws_manager:
-            await ws_manager.broadcast({
-                "type": "download_progress",
-                "download_id": download_id,
-                "status": "downloading",
-            })
+        await progress.downloading()
 
         # 构建 yt-dlp 选项
         outtmpl = os.path.join(save_dir, f"{filename_base}.%(ext)s")
@@ -288,13 +283,7 @@ class YouTubePlatform(BasePlatform):
 
             await db.update_download_progress(download_id, final_size, actual_resolution)
             await db.update_download_status(download_id, "completed")
-            if ws_manager:
-                await ws_manager.broadcast({
-                    "type": "download_progress",
-                    "download_id": download_id,
-                    "status": "completed",
-                    "file_size": final_size,
-                })
+            await progress.completed(final_size)
 
             # 清理临时 cookie 文件
             if cookies:
@@ -309,10 +298,5 @@ class YouTubePlatform(BasePlatform):
         except Exception as e:
             logger.error(f"[YouTubePlatform] 下载失败 {title}: {e}")
             await db.update_download_status(download_id, "failed", str(e))
-            if ws_manager:
-                await ws_manager.broadcast({
-                    "type": "download_progress",
-                    "download_id": download_id,
-                    "status": "failed",
-                })
+            await progress.failed()
             return {"status": "failed", "error": str(e)}

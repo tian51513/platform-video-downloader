@@ -199,8 +199,8 @@ class PlaywrightBrowser:
             logger.warning(f"浏览器关闭部分失败: {'; '.join(errors)}")
         else:
             logger.info("浏览器已关闭")
-        # 保底：杀死所有残留的子进程
-        self._kill_orphan_processes()
+        # 保底：杀死所有残留的子进程（PowerShell 枚举可达 ~15s，放到线程池避免阻塞事件循环）
+        await asyncio.to_thread(self._kill_orphan_processes)
 
     def _kill_orphan_processes(self):
         """杀死当前进程的所有 Playwright 子进程（node/chrome）。

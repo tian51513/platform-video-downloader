@@ -49,3 +49,12 @@ class TestProgressReporter:
             "type": "download_progress", "download_id": 7,
             "file_size": 4096, "total_size": 1500,
         })
+
+
+class TestReporterCallPassthrough:
+    async def test_call_without_status_omits_key(self, ws):
+        """裸 __call__ 直呼（无 status）时消息不得含 status 键 —— youtube 流式进度依赖此形状。"""
+        from platform_video_downloader.core.progress import make_progress
+        await make_progress(ws, 9)(file_size=100, total_size=200)
+        msg = ws.broadcast.await_args.args[0]
+        assert msg == {"type": "download_progress", "download_id": 9, "file_size": 100, "total_size": 200}

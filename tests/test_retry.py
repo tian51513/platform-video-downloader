@@ -79,7 +79,6 @@ class TestIsPermanentError:
             "code=-404, message=啥都木有",
             "code=62002, message=仅UP主自己可见",
             "code=87008, message=充电专属",
-            "ValueError: skipped 该视频",
             "code=62002, message=需要充值",
             "No video streams available",
         ):
@@ -90,6 +89,7 @@ class TestIsPermanentError:
         assert not is_permanent_error("timeout")
         assert not is_permanent_error(ValueError("server error 500"))
         assert not is_permanent_error("")
+        assert not is_permanent_error("download skipped")
 
     async def test_permanent_error_raises_immediately(self):
         from platform_video_downloader.core.retry import is_permanent_error, retry_async

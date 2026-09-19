@@ -5,7 +5,7 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 _NO_RETRY_KEYWORDS = (
-    "code=-404", "code=62002", "code=87008", "skipped",
+    "code=-404", "code=62002", "code=87008",
     "充值", "No video streams available",
 )
 
