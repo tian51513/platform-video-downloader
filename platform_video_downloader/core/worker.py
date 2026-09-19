@@ -88,9 +88,7 @@ async def _download_stream(
                 total_size = existing_size + int(resp.headers.get("Content-Length", 0))
 
         if total_size > 0:
-            await db._xq(
-                "UPDATE download SET total_size=? WHERE id=?", (total_size, download_id)
-            )
+            await db.update_download_total_size(download_id, total_size)
 
         downloaded = existing_size
         mode = "ab" if existing_size > 0 else "wb"
@@ -153,9 +151,7 @@ async def _merge_audio_video(
         os.remove(video_path)
         os.remove(audio_path)
         logger.info(f"[merge] Merged to {output_path}, removed temp files")
-        await db._xq(
-            "UPDATE download SET save_path=? WHERE id=?", (output_path, download_id)
-        )
+        await db.update_download_save_path(download_id, output_path)
         return True
     except Exception as e:
         logger.error(f"[merge] Error: {e}")

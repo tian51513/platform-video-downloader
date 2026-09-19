@@ -210,3 +210,36 @@ class TestDatabase:
         assert len(result["items"]) == 2
         assert result["total"] == 5
         assert result["total_pages"] == 3
+
+    async def test_update_download_total_size(self, db):
+        platform = await db.insert_platform(name="bilibili")
+        creator = await db.insert_creator(platform_id=platform, remote_id="1", name="up", space_url="https://space.bilibili.com/1")
+        video = await db.insert_video(creator_id=creator, remote_id="BV1", title="t")
+        dl = await db.insert_download(video_id=video, save_path="x.mp4", resolution="720p")
+        await db.update_download_total_size(dl, 12345)
+        stats = await db.get_stats()
+        assert stats["total_downloads"] == 1
+
+    async def test_update_download_save_path(self, db):
+        platform = await db.insert_platform(name="bilibili")
+        creator = await db.insert_creator(platform_id=platform, remote_id="1", name="up", space_url="https://space.bilibili.com/1")
+        video = await db.insert_video(creator_id=creator, remote_id="BV1", title="t")
+        dl = await db.insert_download(video_id=video, save_path="old.mp4", resolution="720p")
+        await db.update_download_save_path(dl, "new.mp4")
+        res = await db.get_all_downloads()
+        assert any(r["save_path"] == "new.mp4" for r in res["items"])
+
+    async def test_get_creator_name_by_video(self, db):
+        platform = await db.insert_platform(name="bilibili")
+        creator = await db.insert_creator(platform_id=platform, remote_id="1", name="UP名字", space_url="https://space.bilibili.com/1")
+        video = await db.insert_video(creator_id=creator, remote_id="BV1", title="t")
+        assert await db.get_creator_name_by_video(video) == "UP名字"
+        assert await db.get_creator_name_by_video(99999) is None
+
+    async def test_count_pending_downloads_by_creator(self, db):
+        platform = await db.insert_platform(name="bilibili")
+        creator = await db.insert_creator(platform_id=platform, remote_id="1", name="up", space_url="https://space.bilibili.com/1")
+        video = await db.insert_video(creator_id=creator, remote_id="BV1", title="t")
+        await db.insert_download(video_id=video, save_path="x.mp4", resolution="720p")
+        assert await db.count_pending_downloads_by_creator(creator) == 1
+        assert await db.count_pending_downloads_by_creator(99999) == 0

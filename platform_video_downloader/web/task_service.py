@@ -612,11 +612,7 @@ class TaskService:
         # 重置失败/跳过的下载
         await self.db.reset_task_downloads(cid)
         # 统计被重置的数量
-        cur = await self.db._xq(
-            "SELECT COUNT(*) FROM download WHERE video_id IN (SELECT id FROM video WHERE creator_id=?) AND status='pending'",
-            (cid,),
-        )
-        result["reset"] = (await cur.fetchone())[0]
+        result["reset"] = await self.db.count_pending_downloads_by_creator(cid)
 
         # 记录补全前已有的 video id，用于区分哪些是真正的新视频
         existing_vids_before = {v["id"] for v in await self.db.get_videos_by_creator(cid)}

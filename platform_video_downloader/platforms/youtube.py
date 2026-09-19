@@ -284,9 +284,7 @@ class YouTubePlatform(BasePlatform):
             # 如果扩展名不是 mp4，更新 save_path
             if final_path != save_path:
                 save_path = final_path
-                await db._xq(
-                    "UPDATE download SET save_path=? WHERE id=?", (save_path, download_id)
-                )
+                await db.update_download_save_path(download_id, save_path)
 
             await db.update_download_progress(download_id, final_size, actual_resolution)
             await db.update_download_status(download_id, "completed")

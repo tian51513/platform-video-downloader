@@ -82,15 +82,10 @@ class DownloadManager:
                 continue
             creator_name = dl.get("creator_name")
             if not creator_name:
-                cur = await self.db._xq(
-                    "SELECT c.name FROM creator c JOIN video v ON v.creator_id = c.id WHERE v.id=?",
-                    (dl["video_id"],),
-                )
-                row = await cur.fetchone()
-                if not row:
-                    logger.warning(f"download id={dl['id']} video_id={dl['video_id']} 找不到对应创作者，跳过")
+                creator_name = await self.db.get_creator_name_by_video(dl["video_id"])
+                if not creator_name:
+                    logger.warning(f"download id={dl['id']} 关联的 creator 不存在，跳过")
                     continue
-                creator_name = row[0]
 
             logger.info(f"开始下载: {video['title']} (bvid={video['remote_id']})")
             tasks.append(download_video(

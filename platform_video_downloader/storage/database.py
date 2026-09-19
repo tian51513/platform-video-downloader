@@ -347,6 +347,32 @@ class Database:
                 (file_size, download_id),
             )
 
+    async def update_download_total_size(self, download_id: int, total_size: int):
+        await self._xq(
+            "UPDATE download SET total_size=? WHERE id=?", (total_size, download_id)
+        )
+
+    async def update_download_save_path(self, download_id: int, save_path: str):
+        await self._xq(
+            "UPDATE download SET save_path=? WHERE id=?", (save_path, download_id)
+        )
+
+    async def get_creator_name_by_video(self, video_id: int) -> str | None:
+        cur = await self._xq(
+            "SELECT c.name FROM creator c JOIN video v ON v.creator_id = c.id WHERE v.id=?",
+            (video_id,),
+        )
+        row = await cur.fetchone()
+        return row["name"] if row else None
+
+    async def count_pending_downloads_by_creator(self, creator_id: int) -> int:
+        cur = await self._xq(
+            "SELECT COUNT(*) FROM download WHERE video_id IN (SELECT id FROM video WHERE creator_id=?) AND status='pending'",
+            (creator_id,),
+        )
+        row = await cur.fetchone()
+        return row[0]
+
     async def get_all_creators(self) -> list[dict]:
         cur = await self._xq("SELECT * FROM creator")
         rows = await cur.fetchall()
