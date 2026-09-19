@@ -224,7 +224,7 @@ pip install pytest pytest-asyncio aioresponses
 ### 运行测试
 
 ```bash
-python -m pytest tests/ -v    # 96个测试（Windows venv 下已验证）
+python -m pytest tests/ -v    # 108个测试（Windows venv 下已验证）
 ```
 
 ### 代码规范
@@ -292,7 +292,7 @@ python -m pytest tests/ -v    # 96个测试（Windows venv 下已验证）
 - 30+ REST API端点
 
 **工程**
-- 96个单元测试
+- 108个单元测试
 - start.bat Windows快捷启动
 - CLAUDE.md 项目上下文
 - 完整架构设计文档
@@ -398,6 +398,26 @@ python -m pytest tests/ -v    # 96个测试（Windows venv 下已验证）
 - clearCookie() fetch 调用模式修正
 - cli_entry() argv 传参修正
 - CLI 报错后进程挂死不退出（browser.start() 抛错时 db 未关闭，aiosqlite 非 daemon 线程阻塞退出；db.close() 收口到 download_command 的 finally）
+
+### V5 架构深化（Phase 1+2）
+
+**Phase 1（封堵与接缝）**
+- Database 补命名方法封堵 `_xq` 泄漏（5 处生产调用点收拢，SQL 全部收回类内）
+- 孤儿进程清理加平台守卫 + PowerShell 替代已废弃 wmic（Win11 24H2+）；close() 内改 asyncio.to_thread 不阻塞事件循环
+- 永久错误判定统一 `core/retry.py:is_permanent_error` 单一来源（修复 -404 关键词漂移丢失）
+- `core/progress.py` ProgressReporter 接缝：worker/youtube 共 14 处内联 WS 广播收拢，payload 逐位保形（无 status 键的流式进度形状是前端契约，两处测试钉死）
+
+**Phase 2（流水线统一）**
+- `qr_code_login` 迁入 browser.py，打断 web→cli 反向导入
+- `core/ingest.py`（upsert_videos + enqueue_downloads）统一 5 处重复的入库排队流水线（cli/_run_download、task_service._execute_task、reset_and_backfill、manager auto_discover、enqueue_creator_videos）
+- 修复 `insert_download` 冲突检测（lastrowid→rowcount）—— 旧检测在共享连接上从不触发，"failed/skipped→pending 重置"语义自 V2 起实际从未生效；现经探针验证修复并启用（completed 始终由 SQL status 守卫保护）
+- 重抓已完成的UP主后同步任务状态（防卡 pending / total_downloads=0）
+- download_video 广播序列集成测试钉死 WS 契约
+
+**用户可感知的行为变化（有意为之）**
+- Web 重抓UP主：failed/skipped 视频现在会真正重置为待下载重试（V2 文档承诺但从未生效的行为）
+- CLI 只下载命令行指定的 URL（不再隐式入队数据库中全部 UP 主的 pending）
+- CLI 入队范围为 UP 主在库中的全部视频（含已从空间删除的 → -404 永久错误自动清理记录）
 
 ## Agent skills
 
