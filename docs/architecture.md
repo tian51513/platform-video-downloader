@@ -153,6 +153,7 @@ V4 新增：项目重命名（bilibili_downloader → platform_video_downloader 
 | Chrome Cookie导入 | browser-cookie3 | 处理Chrome v127+ App-Bound Encryption，Chrome运行中也可提取 |
 | 87008错误处理 | 直接skip | 付费专属视频无需重试 |
 | 416错误处理 | 删临时文件重下 | Range不满足说明流URL过期，需全新下载 |
+| db 生命周期 | 命令级 try/finally 收口 | aiosqlite 工作线程非 daemon，任何退出路径不关连接会永久阻塞进程退出（V4修复：报错后挂死） |
 | restart.py | subprocess.Popen | os.execv会替换进程导致stdout丢失，Popen让新进程独立运行 |
 
 ---
@@ -659,12 +660,12 @@ platform_video_downloader/
 
 ## 10. 测试覆盖
 
-80个测试（V1→V4），覆盖：
+82个测试（V1→V4），覆盖：
 
 | 模块 | 测试数 | 覆盖内容 |
 |------|--------|----------|
 | test_browser.py | 12 | Cookie文件I/O、环境变量、解析优先级 |
-| test_cli.py | 9 | 参数解析、子命令、默认值 |
+| test_cli.py | 11 | 参数解析、子命令、默认值、异常路径db关闭 |
 | test_database.py | 9 | CRUD、唯一约束、状态更新、聚合查询 |
 | test_files.py | 7 | 命名模板、非法字符、路径解析 |
 | test_parser.py | 8 | 各类解析、时长转换、流URL选择 |

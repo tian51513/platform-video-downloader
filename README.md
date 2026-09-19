@@ -89,6 +89,22 @@ pip install -e .
 playwright install chromium
 ```
 
+> **Python 无 venv 模块时**（部分精简发行版）：
+> ```bash
+> python -m pip install virtualenv
+> python -m virtualenv .venv
+> ```
+
+> **国内网络 playwright 浏览器下载慢**（官方 CDN 直连约 25KB/s），使用 npmmirror 镜像：
+> ```bash
+> # Windows (cmd)
+> set PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
+> # Linux/Mac
+> export PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
+> playwright install chromium
+> ```
+> 注：镜像可能缺少部分 `dbazure` 路径的依赖（ffmpeg/winldd）导致安装报 404，可先单独安装主浏览器，或从镜像 `builds/` 路径手动下载缺失文件。
+
 ### 依赖说明
 
 - **基础依赖**：通过 `pip install -e .` 自动安装

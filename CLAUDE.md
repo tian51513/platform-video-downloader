@@ -215,10 +215,16 @@ playwright install chromium
 pip install pytest pytest-asyncio aioresponses
 ```
 
+**本机环境注意（Windows/WSL 双侧开发）**:
+- venv 必须是 Windows 侧的（`.venv\Scripts\`），start.bat 依赖它；勿在 WSL 里重建 `.venv`（Linux 的 `bin/` 布局会让 start.bat 失效）
+- 本机 Windows Python（`F:\hclaw\python`）是精简发行版**无 venv 模块**，改用: `python -m pip install virtualenv && python -m virtualenv .venv`
+- playwright 浏览器国内直连约 25KB/s，用 npmmirror 镜像: `set PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright`（镜像缺 dbazure 路径的 ffmpeg/winldd，若 404 需从镜像 `builds/` 路径手动下载后本地 http.server 供给）
+- 从 WSL 调 Windows 命令: `cmd.exe /c "..."`（cwd 自动映射）；Windows 可经 WSL2 localhost 转发访问 WSL 服务
+
 ### 运行测试
 
 ```bash
-python -m pytest tests/ -v    # 80个测试
+python -m pytest tests/ -v    # 82个测试（Windows venv 下已验证）
 ```
 
 ### 代码规范
@@ -228,6 +234,7 @@ python -m pytest tests/ -v    # 80个测试
 - 错误处理：网络错误重试，永久错误(code=-404/62002/87008)直接删除记录，日志级别：root=INFO, aiosqlite=WARNING
 - 类型标注使用Python 3.10+风格（`str | None`而非`Optional[str]`）
 - Web设置持久化到 platform_video_downloader_settings.json，优先级：文件 > config.py默认值
+- 所有命令退出路径必须关闭数据库连接（aiosqlite 工作线程非 daemon，连接不关闭会永久阻塞进程退出）
 - 付费/充电专属视频直接从数据库删除（不保留记录），避免污染统计数据
 - 存储检测两阶段：Phase1 恢复非completed但文件存在的下载，Phase2 验证completed路径有效性
 
@@ -285,7 +292,7 @@ python -m pytest tests/ -v    # 80个测试
 - 30+ REST API端点
 
 **工程**
-- 54个单元测试
+- 82个单元测试
 - start.bat Windows快捷启动
 - CLAUDE.md 项目上下文
 - 完整架构设计文档
@@ -390,6 +397,7 @@ python -m pytest tests/ -v    # 80个测试
 **Bug 修复**
 - clearCookie() fetch 调用模式修正
 - cli_entry() argv 传参修正
+- CLI 报错后进程挂死不退出（browser.start() 抛错时 db 未关闭，aiosqlite 非 daemon 线程阻塞退出；db.close() 收口到 download_command 的 finally）
 
 ## Agent skills
 

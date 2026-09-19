@@ -152,6 +152,16 @@ async def _qr_code_login(page) -> list[dict]:
 async def download_command(args):
     db = Database(get_effective_db_path())
     await db.init()
+    try:
+        await _run_download(args, db)
+    finally:
+        # 任何退出路径（含 browser.start() 抛错）都必须关闭数据库，
+        # 否则 aiosqlite 非 daemon 工作线程会阻塞进程退出
+        await db.close()
+
+
+async def _run_download(args, db):
+    """下载主流程（调用方负责 db 生命周期）。"""
 
     resolution_priority = [args.resolution] if args.resolution else DEFAULT_RESOLUTION_PRIORITY
 
@@ -259,7 +269,6 @@ async def download_command(args):
     if args.dry_run:
         stats = await db.get_stats()
         logger.info(f"Dry run complete: {stats}")
-        await db.close()
         return
 
     # --- Phase 2: 下载（aiohttp） ---
@@ -275,7 +284,6 @@ async def download_command(args):
 
     stats = await db.get_stats()
     logger.info(f"Done: {stats}")
-    await db.close()
 
 
 async def web_command(args):
