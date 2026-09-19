@@ -122,17 +122,19 @@ class TestResolveCookies:
 
 class TestKillOrphanProcesses:
     def test_noop_on_non_windows(self):
-        """非 Windows 平台不得起任何子进程。"""
+        """非 Windows 平台不得起任何子进程。
+
+        用 Mock 记录调用而非 side_effect 抛错——后者会被 SUT 的
+        except Exception 静默吞噬，导致守卫被删后测试仍然通过。
+        """
         import platform_video_downloader.browser as browser_mod
         from unittest.mock import patch
 
-        def fail_run(*args, **kwargs):
-            raise AssertionError("subprocess.run should not be called on non-Windows")
-
         b = browser_mod.PlaywrightBrowser()
         with patch.object(browser_mod.sys, "platform", "linux"), \
-             patch.object(browser_mod.subprocess, "run", side_effect=fail_run):
+             patch.object(browser_mod.subprocess, "run") as mock_run:
             b._kill_orphan_processes()  # 不应抛错也不应调用 subprocess
+        mock_run.assert_not_called()
 
     def test_kills_children_via_powershell_on_windows(self):
         import platform_video_downloader.browser as browser_mod
