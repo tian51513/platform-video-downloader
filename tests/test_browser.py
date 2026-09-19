@@ -118,3 +118,33 @@ class TestResolveCookies:
             cookies, needs_qr = _resolve_cookies([], Args())
         assert cookies == []
         assert needs_qr is True
+
+
+class TestKillOrphanProcesses:
+    def test_noop_on_non_windows(self):
+        """非 Windows 平台不得起任何子进程。"""
+        import platform_video_downloader.browser as browser_mod
+        from unittest.mock import patch
+
+        def fail_run(*args, **kwargs):
+            raise AssertionError("subprocess.run should not be called on non-Windows")
+
+        b = browser_mod.PlaywrightBrowser()
+        with patch.object(browser_mod.sys, "platform", "linux"), \
+             patch.object(browser_mod.subprocess, "run", side_effect=fail_run):
+            b._kill_orphan_processes()  # 不应抛错也不应调用 subprocess
+
+    def test_kills_children_via_powershell_on_windows(self):
+        import platform_video_downloader.browser as browser_mod
+        from unittest.mock import patch
+
+        b = browser_mod.PlaywrightBrowser()
+        ps_output = "1234\r\n5678\r\n"
+        with patch.object(browser_mod.subprocess, "run") as mock_run, \
+             patch.object(browser_mod.sys, "platform", "win32"):
+            mock_run.return_value.stdout = ps_output
+            b._kill_orphan_processes()
+
+        cmds = [c.args[0] for c in mock_run.call_args_list]
+        assert any("powershell" in c for c in cmds), "应使用 PowerShell 枚举子进程"
+        assert any("taskkill" in c for c in cmds), "应使用 taskkill 击杀子进程"

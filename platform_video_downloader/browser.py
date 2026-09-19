@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import subprocess
+import sys
 
 from platform_video_downloader.config import USER_AGENT
 
@@ -140,46 +142,32 @@ class PlaywrightBrowser:
         self._kill_orphan_processes()
 
     def _kill_orphan_processes(self):
-        """杀死当前进程的所有 Playwright 子进程（node.exe/chrome.exe）。"""
-        import subprocess
-        import os
+        """杀死当前进程的所有 Playwright 子进程（node/chrome）。
+
+        仅 Windows：用 PowerShell Get-CimInstance 枚举子进程（wmic 在
+        Win11 24H2+ 已移除），再逐个 taskkill。失败静默——清理是尽力而为。
+        """
+        if sys.platform != "win32":
+            return
         my_pid = os.getpid()
         try:
             result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {my_pid}", "/FO", "CSV", "/NH"],
-                capture_output=True, text=True, timeout=5,
+                [
+                    "powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_Process | Where-Object { "
+                    f"$_.ParentProcessId -eq {my_pid} -and $_.Name -match "
+                    "'^(node|chrome|chromium|chrome-headless-shell)(\\.exe)?$' "
+                    "} | Select-Object -ExpandProperty ProcessId",
+                ],
+                capture_output=True, text=True, timeout=10,
             )
-            # 没有子进程时跳过
-            if not result.stdout.strip():
-                return
+            pids = [int(line.strip()) for line in result.stdout.splitlines() if line.strip().isdigit()]
+            for pid in pids:
+                try:
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                   capture_output=True, timeout=5)
+                    logger.debug(f"杀死孤儿进程: PID={pid}")
+                except Exception:
+                    pass
         except Exception:
             return
-        # 用 wmic 查找当前进程的子进程树
-        for proc_name in ("node.exe", "chrome.exe", "chromium.exe"):
-            try:
-                result = subprocess.run(
-                    ["wmic", "process", "where", f"(Name='{proc_name}')",
-                     "get", "ProcessId,ParentProcessId", "/FORMAT:CSV", "/NH"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                for line in result.stdout.strip().splitlines():
-                    line = line.strip().strip('"')
-                    parts = [p.strip().strip('"') for p in line.split(",")]
-                    if len(parts) < 2:
-                        continue
-                    try:
-                        ppid = int(parts[0])
-                        pid = int(parts[1])
-                    except ValueError:
-                        continue
-                    if ppid == my_pid:
-                        try:
-                            subprocess.run(
-                                ["taskkill", "/F", "/PID", str(pid)],
-                                capture_output=True, timeout=5,
-                            )
-                            logger.debug(f"杀死孤儿进程: {proc_name} PID={pid}")
-                        except Exception:
-                            pass
-            except Exception:
-                pass
