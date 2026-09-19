@@ -454,12 +454,11 @@ class TaskService:
             self._login_in_progress = True
             try:
                 await self._broadcast({"type": "login_status", "status": "in_progress"})
-                from platform_video_downloader.browser import PlaywrightBrowser, save_cookies_to_file
-                from platform_video_downloader.cli.main import _qr_code_login
+                from platform_video_downloader.browser import PlaywrightBrowser, qr_code_login, save_cookies_to_file
                 browser = PlaywrightBrowser(headless=False)
                 try:
                     await browser.start()
-                    login_cookies = await _qr_code_login(browser.page)
+                    login_cookies = await qr_code_login(browser.page)
                     cookie_path = self._get_cookie_file("bilibili") or DEFAULT_COOKIE_CACHE_PATH
                     save_cookies_to_file(login_cookies, cookie_path)
                     return True, ""

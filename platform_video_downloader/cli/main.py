@@ -26,8 +26,6 @@ logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-QR_LOGIN_TIMEOUT = 120  # seconds
-
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(prog="pvd", description="多平台视频批量下载器")
@@ -91,64 +89,6 @@ def _resolve_cookies(cli_cookies: list[dict], args) -> tuple[list[dict], bool]:
     return [], True
 
 
-async def _qr_code_login(page) -> list[dict]:
-    """在浏览器中执行B站二维码登录流程。
-
-    前提：page 已导航到 bilibili.com，用户未登录。
-    Returns: 登录成功后浏览器上下文中的所有 .bilibili.com cookies。
-    Raises: TimeoutError 超时未完成扫码。
-    """
-    # 尝试点击页面登录按钮
-    login_selectors = [
-        ".header-login-entry",
-        "a[href*='passport.bilibili.com']",
-        ".login-btn",
-    ]
-    clicked = False
-    for selector in login_selectors:
-        try:
-            btn = page.locator(selector).first
-            if await btn.is_visible(timeout=3000):
-                await btn.click()
-                clicked = True
-                logger.info(f"点击登录按钮: {selector}")
-                break
-        except Exception:
-            continue
-
-    if not clicked:
-        logger.info("未找到登录按钮，导航到登录页")
-        await page.goto("https://passport.bilibili.com/login", wait_until="domcontentloaded")
-
-    # 等待二维码渲染
-    await page.wait_for_timeout(2000)
-
-    print("\n" + "=" * 50)
-    print("  请在浏览器窗口中扫描二维码登录B站")
-    print("  使用B站手机APP扫描，扫描后点击确认")
-    print("=" * 50 + "\n")
-
-    # 轮询检测 SESSDATA cookie
-    context = page.context
-    start = asyncio.get_event_loop().time()
-
-    while True:
-        elapsed = asyncio.get_event_loop().time() - start
-        if elapsed > QR_LOGIN_TIMEOUT:
-            raise TimeoutError(
-                f"二维码登录超时（{QR_LOGIN_TIMEOUT}秒）。请重新运行程序。"
-            )
-
-        cookies = await context.cookies()
-        if any(c["name"] == "SESSDATA" for c in cookies):
-            logger.info("检测到登录成功 (SESSDATA cookie 已获取)")
-            await page.wait_for_timeout(2000)
-            all_cookies = await context.cookies()
-            return [c for c in all_cookies if ".bilibili.com" in c.get("domain", "")]
-
-        await asyncio.sleep(2)
-
-
 async def download_command(args):
     db = Database(get_effective_db_path())
     await db.init()
@@ -169,6 +109,7 @@ async def _run_download(args, db):
     from platform_video_downloader.browser import (
         BILIBILI_COOKIE_DOMAIN,
         PlaywrightBrowser,
+        qr_code_login,
         save_cookies_to_file,
     )
     from platform_video_downloader.bilibili.scraper import BilibiliScraper
@@ -191,7 +132,7 @@ async def _run_download(args, db):
 
     # 如果需要扫码登录
     if needs_qr_login:
-        login_cookies = await _qr_code_login(browser.page)
+        login_cookies = await qr_code_login(browser.page)
         save_cookies_to_file(login_cookies, DEFAULT_COOKIE_CACHE_PATH)
         resolved_cookies = login_cookies
 

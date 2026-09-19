@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 
@@ -150,3 +151,20 @@ class TestKillOrphanProcesses:
         cmds = [c.args[0] for c in mock_run.call_args_list]
         assert any("powershell" in c for c in cmds), "应使用 PowerShell 枚举子进程"
         assert any("taskkill" in c for c in cmds), "应使用 taskkill 击杀子进程"
+
+
+class TestQrCodeLoginRelocation:
+    def test_qr_code_login_lives_in_browser_module(self):
+        from platform_video_downloader.browser import qr_code_login
+        import inspect
+        assert inspect.iscoroutinefunction(qr_code_login)
+        # cli 与 task_service 不再各自持有定义/私有导入
+        import platform_video_downloader.cli.main as cli_mod
+        assert not hasattr(cli_mod, "_qr_code_login")
+
+    def test_task_service_imports_from_browser(self):
+        import platform_video_downloader.web.task_service as ts
+        import platform_video_downloader.browser as browser_mod
+        src = inspect.getsource(ts.TaskService.trigger_qr_login)
+        assert "from platform_video_downloader.browser import" in src
+        assert "cli.main" not in src

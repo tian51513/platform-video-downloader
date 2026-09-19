@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -9,6 +10,8 @@ from platform_video_downloader.config import USER_AGENT
 logger = logging.getLogger(__name__)
 
 BILIBILI_COOKIE_DOMAIN = ".bilibili.com"
+
+QR_LOGIN_TIMEOUT = 120  # seconds
 
 
 def build_cookies_from_env() -> list[dict]:
@@ -57,6 +60,64 @@ def save_cookies_to_file(cookies: list[dict], path: str):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cookies, f, ensure_ascii=False, indent=2)
     logger.info(f"已保存 {len(cookies)} 个 cookies 到缓存: {path}")
+
+
+async def qr_code_login(page) -> list[dict]:
+    """在浏览器中执行B站二维码登录流程。
+
+    前提：page 已导航到 bilibili.com，用户未登录。
+    Returns: 登录成功后浏览器上下文中的所有 .bilibili.com cookies。
+    Raises: TimeoutError 超时未完成扫码。
+    """
+    # 尝试点击页面登录按钮
+    login_selectors = [
+        ".header-login-entry",
+        "a[href*='passport.bilibili.com']",
+        ".login-btn",
+    ]
+    clicked = False
+    for selector in login_selectors:
+        try:
+            btn = page.locator(selector).first
+            if await btn.is_visible(timeout=3000):
+                await btn.click()
+                clicked = True
+                logger.info(f"点击登录按钮: {selector}")
+                break
+        except Exception:
+            continue
+
+    if not clicked:
+        logger.info("未找到登录按钮，导航到登录页")
+        await page.goto("https://passport.bilibili.com/login", wait_until="domcontentloaded")
+
+    # 等待二维码渲染
+    await page.wait_for_timeout(2000)
+
+    print("\n" + "=" * 50)
+    print("  请在浏览器窗口中扫描二维码登录B站")
+    print("  使用B站手机APP扫描，扫描后点击确认")
+    print("=" * 50 + "\n")
+
+    # 轮询检测 SESSDATA cookie
+    context = page.context
+    start = asyncio.get_event_loop().time()
+
+    while True:
+        elapsed = asyncio.get_event_loop().time() - start
+        if elapsed > QR_LOGIN_TIMEOUT:
+            raise TimeoutError(
+                f"二维码登录超时（{QR_LOGIN_TIMEOUT}秒）。请重新运行程序。"
+            )
+
+        cookies = await context.cookies()
+        if any(c["name"] == "SESSDATA" for c in cookies):
+            logger.info("检测到登录成功 (SESSDATA cookie 已获取)")
+            await page.wait_for_timeout(2000)
+            all_cookies = await context.cookies()
+            return [c for c in all_cookies if ".bilibili.com" in c.get("domain", "")]
+
+        await asyncio.sleep(2)
 
 
 class PlaywrightBrowser:
