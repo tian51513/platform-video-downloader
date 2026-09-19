@@ -110,8 +110,9 @@ playwright install chromium
 - **基础依赖**：通过 `pip install -e .` 自动安装
 - **Playwright**：需要手动安装 Chromium 浏览器
 - **Node.js**（Windows YouTube 下载）：yt-dlp 需要用于 YouTube 签名解析
-- **ffmpeg**：用于合并视频流和音频流
-  - Windows: 从 [ffmpeg官网](https://ffmpeg.org/download.html) 下载并添加到PATH
+- **ffmpeg**：用于合并视频流和音频流（双流合并）
+  - 默认通过 `imageio-ffmpeg` 包自动提供（pip 安装即带，无需手动配置）
+  - 也可从 [ffmpeg官网](https://ffmpeg.org/download.html) 安装并添加到 PATH（优先使用系统版本）
   - Linux: `sudo apt install ffmpeg`
   - Mac: `brew install ffmpeg`
 - **browser-cookie3**（Windows，可选）：YouTube Cookie 从 Chrome 导入

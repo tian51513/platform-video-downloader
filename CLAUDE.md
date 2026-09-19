@@ -263,7 +263,7 @@ python -m pytest tests/ -v    # 82个测试（Windows venv 下已验证）
 - cid缺失时自动通过API补充
 - 标签缺失时通过 get_video_info 补充
 - 文件名包含bvid防重名冲突
-- 双流下载（视频+音频）+ ffmpeg合并（合并状态实时显示）
+- 双流下载（视频+音频）+ ffmpeg合并（合并状态实时显示；ffmpeg查找顺序: PATH > imageio-ffmpeg包，两者皆无时降级分离存储并在日志警告）
 - 断点续传（Range请求，临时文件.video.tmp/.audio.tmp）
 - 单连接下载限速（最低100KB/s）
 
