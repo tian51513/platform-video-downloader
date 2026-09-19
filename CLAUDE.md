@@ -224,7 +224,7 @@ pip install pytest pytest-asyncio aioresponses
 ### 运行测试
 
 ```bash
-python -m pytest tests/ -v    # 82个测试（Windows venv 下已验证）
+python -m pytest tests/ -v    # 96个测试（Windows venv 下已验证）
 ```
 
 ### 代码规范
@@ -292,7 +292,7 @@ python -m pytest tests/ -v    # 82个测试（Windows venv 下已验证）
 - 30+ REST API端点
 
 **工程**
-- 82个单元测试
+- 96个单元测试
 - start.bat Windows快捷启动
 - CLAUDE.md 项目上下文
 - 完整架构设计文档
