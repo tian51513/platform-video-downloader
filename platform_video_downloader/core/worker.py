@@ -9,6 +9,7 @@ import time
 import aiohttp
 
 from platform_video_downloader.config import MIN_SPEED_LIMIT_KB, REQUEST_TIMEOUT
+from platform_video_downloader.core.progress import make_progress
 from platform_video_downloader.core.retry import is_permanent_error, retry_async
 from platform_video_downloader.storage.files import build_filename, resolve_save_path
 
@@ -35,7 +36,7 @@ async def _download_stream(
     speed_limit_bps: int = 0,
     existing_size: int = 0,
     total_size: int = 0,
-    ws_manager=None,
+    progress=None,
 ) -> int:
     """Download a stream with resume support and optional speed limit.
 
@@ -69,13 +70,8 @@ async def _download_stream(
                         if downloaded % (chunk_size * 10) == 0 or downloaded == 0:
                             await db.update_download_progress(download_id, downloaded)
                         progress_counter += 1
-                        if progress_counter % 5 == 0 and ws_manager:
-                            await ws_manager.broadcast({
-                                "type": "download_progress",
-                                "download_id": download_id,
-                                "file_size": downloaded,
-                                "total_size": 0,
-                            })
+                        if progress_counter % 5 == 0 and progress:
+                            await progress(file_size=downloaded, total_size=0)
                 return downloaded
         resp.raise_for_status()
         # Determine total size
@@ -103,13 +99,8 @@ async def _download_stream(
                 if downloaded % (chunk_size * 10) == 0 or downloaded == total_size:
                     await db.update_download_progress(download_id, downloaded)
                 progress_counter += 1
-                if progress_counter % 5 == 0 and ws_manager:
-                    await ws_manager.broadcast({
-                        "type": "download_progress",
-                        "download_id": download_id,
-                        "file_size": downloaded,
-                        "total_size": total_size,
-                    })
+                if progress_counter % 5 == 0 and progress:
+                    await progress(file_size=downloaded, total_size=total_size)
         return downloaded
 
 
@@ -176,16 +167,12 @@ async def download_video(
     cancel_event=None,
 ):
     bvid = video["remote_id"]
+    progress = make_progress(ws_manager, download_id)
     try:
         if cancel_event and cancel_event.is_set():
             return
         await db.update_download_status(download_id, "downloading")
-        if ws_manager:
-            await ws_manager.broadcast({
-                "type": "download_progress",
-                "download_id": download_id,
-                "status": "downloading",
-            })
+        await progress.downloading()
 
         extra = video.get("extra", {})
         if isinstance(extra, str):
@@ -209,12 +196,7 @@ async def download_video(
             # 检查是否为充电专属视频（get_video_info 返回 is_upower_exclusive）
             if video_info and video_info.get("is_upower_exclusive"):
                 await db.remove_paid_video(download_id)
-                if ws_manager:
-                    await ws_manager.broadcast({
-                        "type": "download_progress",
-                        "download_id": download_id,
-                        "status": "removed",
-                    })
+                await progress.removed()
                 logger.info(f"Removed {bvid}: UP主充电专属视频")
                 return
 
@@ -228,12 +210,7 @@ async def download_video(
                         )
                     if video_info and video_info.get("is_upower_exclusive"):
                         await db.remove_paid_video(download_id)
-                        if ws_manager:
-                            await ws_manager.broadcast({
-                                "type": "download_progress",
-                                "download_id": download_id,
-                                "status": "removed",
-                            })
+                        await progress.removed()
                         logger.info(f"Removed {bvid}: UP主充电专属视频")
                         return
                     if video_info and video_info.get("tags"):
@@ -254,12 +231,7 @@ async def download_video(
                 if is_permanent_error(e):
                     # Delete the download and video record — paid/exclusive videos don't belong in the system
                     await db.remove_paid_video(download_id)
-                    if ws_manager:
-                        await ws_manager.broadcast({
-                            "type": "download_progress",
-                            "download_id": download_id,
-                            "status": "removed",
-                        })
+                    await progress.removed()
                     logger.info(f"Removed {bvid}: paid/exclusive video ({e})")
                     return
                 raise
@@ -286,7 +258,7 @@ async def download_video(
                     headers=api.headers, speed_limit_bps=speed_limit_bps,
                     existing_size=existing_video_size,
                     total_size=stream.get("video_size", 0),
-                    ws_manager=ws_manager,
+                    progress=progress,
                 )
             except Exception as dl_err:
                 raise RuntimeError(f"视频流下载失败: {dl_err}") from dl_err
@@ -304,19 +276,14 @@ async def download_video(
                         headers=api.headers, speed_limit_bps=speed_limit_bps,
                         existing_size=existing_audio_size,
                         total_size=stream.get("audio_size", 0),
-                        ws_manager=ws_manager,
+                        progress=progress,
                     )
                 except Exception as dl_err:
                     raise RuntimeError(f"音频流下载失败: {dl_err}") from dl_err
 
         # 5. Merge audio + video with ffmpeg
         if stream.get("audio_url") and os.path.exists(video_tmp) and os.path.exists(audio_tmp):
-            if ws_manager:
-                await ws_manager.broadcast({
-                    "type": "download_progress",
-                    "download_id": download_id,
-                    "status": "merging",
-                })
+            await progress.merging()
             merged = await _merge_audio_video(video_tmp, audio_tmp, save_path, download_id, db)
             if not merged and os.path.exists(video_tmp):
                 # ffmpeg failed or not found — save video only, keep audio separately
@@ -333,29 +300,13 @@ async def download_video(
             final_size = os.path.getsize(save_path)
             await db.update_download_progress(download_id, final_size, stream["resolution"])
             await db.update_download_status(download_id, "completed")
-            if ws_manager:
-                await ws_manager.broadcast({
-                    "type": "download_progress",
-                    "download_id": download_id,
-                    "status": "completed",
-                    "file_size": final_size,
-                })
+            await progress.completed(file_size=final_size)
             logger.info(f"Completed {filename} ({stream['resolution']}, {final_size} bytes)")
         else:
             await db.update_download_status(download_id, "failed", "下载完成但输出文件丢失")
-            if ws_manager:
-                await ws_manager.broadcast({
-                    "type": "download_progress",
-                    "download_id": download_id,
-                    "status": "failed",
-                })
+            await progress.failed()
 
     except Exception as e:
         logger.error(f"Failed {bvid}: {e}", exc_info=True)
         await db.update_download_status(download_id, "failed", str(e))
-        if ws_manager:
-            await ws_manager.broadcast({
-                "type": "download_progress",
-                "download_id": download_id,
-                "status": "failed",
-            })
+        await progress.failed()
