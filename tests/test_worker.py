@@ -160,6 +160,78 @@ class TestDownloadWorker:
         assert await v.fetchone() is None
 
 
+class TestDownloadVideoBroadcastSequence:
+    async def test_happy_path_status_sequence(self, tmp_path, db):
+        """download_video 全程广播序列（真实 ProgressReporter，不 mock make_progress）：
+
+        downloading → (无 status 键的流式进度) → completed(file_size>0)。
+        前端依赖 status 键做状态机路由、无 status 键做进度条原地更新——消息形状不可变更。
+        """
+        from platform_video_downloader.core.worker import download_video
+        from platform_video_downloader.config import DEFAULT_NAME_TEMPLATE
+
+        pid = await db.insert_platform(name="bilibili")
+        cid = await db.insert_creator(
+            platform_id=pid, remote_id="123", name="TestUP",
+            space_url="https://space.bilibili.com/123",
+        )
+        vid = await db.insert_video(
+            creator_id=cid, remote_id="BV1xx", title="Seq Video",
+            duration=60, extra='{"cid": 456}',
+        )
+        did = await db.insert_download(
+            video_id=vid, save_path=str(tmp_path / "seq.mp4"), resolution="720p",
+        )
+
+        mock_api = AsyncMock()
+        mock_api.get_video_info.return_value = {"cid": 456, "tags": ["test"]}
+        # 无 audio_url → 纯视频路径，跳过 ffmpeg 合并
+        mock_api.get_stream_urls.return_value = {
+            "video_url": "http://example.com/video.mp4",
+            "audio_url": None,
+            "resolution": "720p",
+        }
+        mock_api.headers = {"Referer": "https://www.bilibili.com/"}
+
+        # 5 个 chunk：_download_stream 的 progress_counter 每 5 个 chunk 广播一次，
+        # 恰好触发 1 条无 status 键的流式进度消息
+        video_resp = _make_mock_response(
+            headers={"Content-Length": "1000"},
+            chunks=[b"v" * 200] * 5,
+        )
+        mock_session = _mock_session_get([video_resp])
+
+        ws = MagicMock()
+        ws.broadcast = AsyncMock()
+
+        await download_video(
+            db=db, download_id=did,
+            video={"id": vid, "remote_id": "BV1xx", "title": "Seq Video", "extra": {"cid": 456}},
+            creator_name="TestUP", section_name=None, save_dir=str(tmp_path),
+            api=mock_api, session=mock_session,
+            resolution_priority=["720p"],
+            name_template=DEFAULT_NAME_TEMPLATE,
+            api_semaphore=AsyncMock(), download_semaphore=AsyncMock(),
+            ws_manager=ws,
+        )
+
+        msgs = [c.args[0] for c in ws.broadcast.await_args_list
+                if c.args[0]["type"] == "download_progress"]
+        statuses = [m.get("status") for m in msgs]
+        assert statuses[0] == "downloading"
+        assert statuses[-1] == "completed"
+        # 终态广播携带正数 file_size
+        assert msgs[-1]["file_size"] > 0
+        # 中间流式进度消息必须无 status 键（前端据此路由到进度条原地更新分支）
+        intermediate = msgs[1:-1]
+        assert intermediate, "expected at least one status-less stream progress broadcast"
+        for m in intermediate:
+            assert "status" not in m
+            assert m["file_size"] > 0
+        # 所有 download_progress 消息都属于本下载
+        assert {m["download_id"] for m in msgs} == {did}
+
+
 class TestDownloadStream:
     async def test_download_stream_basic(self, tmp_path, db):
         """Test _download_stream writes chunks to file and returns size."""
