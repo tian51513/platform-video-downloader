@@ -9,7 +9,7 @@ import time
 import aiohttp
 
 from platform_video_downloader.config import MIN_SPEED_LIMIT_KB, REQUEST_TIMEOUT
-from platform_video_downloader.core.retry import retry_async
+from platform_video_downloader.core.retry import is_permanent_error, retry_async
 from platform_video_downloader.storage.files import build_filename, resolve_save_path
 
 logger = logging.getLogger(__name__)
@@ -251,7 +251,7 @@ async def download_video(
                 logger.debug(f"[worker] {bvid} stream: {stream['resolution']}, "
                              f"video={stream['video_url'][:60]}... audio={'yes' if stream.get('audio_url') else 'no'}")
             except ValueError as e:
-                if "skipped" in str(e) or "62002" in str(e) or "87008" in str(e) or "充值" in str(e) or "No video streams available" in str(e):
+                if is_permanent_error(e):
                     # Delete the download and video record — paid/exclusive videos don't belong in the system
                     await db.remove_paid_video(download_id)
                     if ws_manager:

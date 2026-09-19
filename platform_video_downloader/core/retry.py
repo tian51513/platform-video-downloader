@@ -4,7 +4,16 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-_NO_RETRY_KEYWORDS = ("code=-404", "code=62002", "code=87008", "skipped:")
+_NO_RETRY_KEYWORDS = (
+    "code=-404", "code=62002", "code=87008", "skipped",
+    "充值", "No video streams available",
+)
+
+
+def is_permanent_error(error: str | Exception) -> bool:
+    """B站永久性错误判定（单一来源）：付费/删除/不存在/充电专属视频不应重试。"""
+    msg = str(error)
+    return any(kw in msg for kw in _NO_RETRY_KEYWORDS)
 
 
 async def retry_async(func, max_retries: int = 3, backoff_base: float = 2):
@@ -13,8 +22,7 @@ async def retry_async(func, max_retries: int = 3, backoff_base: float = 2):
         try:
             return await func()
         except (ValueError, TypeError) as exc:
-            error_msg = str(exc)
-            if any(kw in error_msg for kw in _NO_RETRY_KEYWORDS):
+            if is_permanent_error(exc):
                 raise
             last_exc = exc
             if attempt < max_retries:

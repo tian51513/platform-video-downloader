@@ -70,3 +70,33 @@ class TestRetry:
         with pytest.raises(ValueError, match="skipped"):
             await retry_async(fail_skip, max_retries=3, backoff_base=0)
         assert call_count == 1
+
+
+class TestIsPermanentError:
+    def test_all_keywords_permanent(self):
+        from platform_video_downloader.core.retry import is_permanent_error
+        for msg in (
+            "code=-404, message=啥都木有",
+            "code=62002, message=仅UP主自己可见",
+            "code=87008, message=充电专属",
+            "ValueError: skipped 该视频",
+            "code=62002, message=需要充值",
+            "No video streams available",
+        ):
+            assert is_permanent_error(msg), msg
+
+    def test_transient_not_permanent(self):
+        from platform_video_downloader.core.retry import is_permanent_error
+        assert not is_permanent_error("timeout")
+        assert not is_permanent_error(ValueError("server error 500"))
+        assert not is_permanent_error("")
+
+    async def test_permanent_error_raises_immediately(self):
+        from platform_video_downloader.core.retry import is_permanent_error, retry_async
+        calls = []
+        async def failing():
+            calls.append(1)
+            raise ValueError("code=-404 not found")
+        with pytest.raises(ValueError):
+            await retry_async(failing, max_retries=3, backoff_base=0.01)
+        assert len(calls) == 1  # 永久错误不重试
